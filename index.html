@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Smart PDF & MP3 Player</title>
+  <style>
+    /* 여백을 완전히 없애고 스크롤바를 숨깁니다 */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000;
+    }
+
+    /* 구글 배너를 화면 상단 바깥으로 밀어내는 컨테이너 */
+    .wrapper {
+      position: absolute;
+      top: -45px; /* 구글 Apps Script 상단 배너 높이만큼 위로 이동 */
+      left: 0;
+      width: 100%;
+      /* 위로 밀린 만큼 높이를 추가하여 화면 하단이 잘리지 않도록 보정 */
+      height: calc(100% + 45px);
+    }
+
+    /* 전체 화면을 채우는 iframe */
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <!-- src 속성에 배포하신 정식 웹앱 링크(/exec)를 넣습니다 -->
+    <iframe 
+      src="https://script.google.com/macros/s/AKfycbwETHAVJ8E0JJFJW8omXE_sSaiQmGquPBQiLRvqRv5u8e59cNuc8D14gPHrQATJrgAJ/exec" 
+      allow="autoplay; fullscreen"
+    ></iframe>
+  </div>
+</body>
+</html>
