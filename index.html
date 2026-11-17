@@ -2,45 +2,738 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Smart PDF & MP3 Player</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart PDF & Audio Player</title>
+
+  <!-- Mozilla PDF.js (하단 툴바 없는 깔끔한 폭 맞춤 PDF 렌더링용) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
   <style>
-    /* 여백을 완전히 없애고 스크롤바를 숨깁니다 */
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
+    :root {
+      --primary-color: #3b82f6;
+      --primary-hover: #2563eb;
+      --danger-color: #ef4444;
+      --danger-hover: #dc2626;
+      --bg-color: #f1f5f9;
+      --panel-bg: #ffffff;
+      --text-main: #1e293b;
+      --text-sub: #64748b;
+      --border-color: #e2e8f0;
+      --player-height: 76px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body, html {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-color);
+      display: flex; flex-direction: column;
       overflow: hidden;
-      background-color: #000;
     }
 
-    /* 구글 배너를 화면 상단 바깥으로 밀어내는 컨테이너 */
-    .wrapper {
-      position: absolute;
-      top: -45px; /* 구글 Apps Script 상단 배너 높이만큼 위로 이동 */
-      left: 0;
-      width: 100%;
-      /* 위로 밀린 만큼 높이를 추가하여 화면 하단이 잘리지 않도록 보정 */
-      height: calc(100% + 45px);
+    /* =========================================
+       1. 폴더 및 순차 파일 선택 모달
+       ========================================= */
+    #setup-modal {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(15, 23, 42, 0.75);
+      display: flex; justify-content: center; align-items: center;
+      z-index: 1000; backdrop-filter: blur(5px);
+      padding: 16px;
     }
 
-    /* 전체 화면을 채우는 iframe */
-    iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-      display: block;
+    .modal-card {
+      background: var(--panel-bg);
+      padding: 24px; border-radius: 16px;
+      width: 100%; max-width: 460px;
+      max-height: 100%; overflow-y: auto;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+      position: relative;
     }
+
+    .modal-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 16px;
+    }
+    .modal-header h2 { margin: 0; font-size: 19px; color: var(--text-main); }
+
+    .btn-close-modal {
+      background: #f1f5f9; border: none; color: var(--text-sub);
+      width: 30px; height: 30px; border-radius: 50%;
+      font-size: 15px; cursor: pointer; display: none;
+      align-items: center; justify-content: center;
+    }
+    .btn-close-modal:hover { background: #e2e8f0; color: var(--text-main); }
+
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block; font-size: 13px; font-weight: 700;
+      margin-bottom: 6px; color: var(--text-main);
+    }
+    .step-badge {
+      display: inline-block; background: var(--primary-color); color: #fff;
+      font-size: 11px; padding: 2px 7px; border-radius: 10px; margin-right: 5px;
+    }
+
+    .folder-input-row { display: flex; gap: 8px; }
+    .input-text, .select-box {
+      width: 100%; padding: 11px 12px;
+      border: 1.5px solid var(--border-color); border-radius: 9px;
+      font-size: 13.5px; color: var(--text-main); background: #fff;
+      outline: none; transition: 0.2s;
+    }
+    .input-text:focus, .select-box:focus { border-color: var(--primary-color); }
+
+    .btn-primary {
+      padding: 11px 16px; background: var(--primary-color); color: #fff;
+      border: none; border-radius: 9px; font-size: 14px; font-weight: 700;
+      cursor: pointer; transition: 0.2s; white-space: nowrap;
+    }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    .btn-full { width: 100%; padding: 13px; font-size: 15px; margin-top: 6px; }
+
+    /* 경고 및 안내 배너 */
+    #alert-box {
+      display: none; padding: 11px 13px; border-radius: 8px;
+      font-size: 13px; line-height: 1.45; margin-bottom: 14px;
+      white-space: pre-wrap;
+    }
+    .alert-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+    .alert-info { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+
+    /* 파일 선택 영역 */
+    #file-selection-area {
+      display: none; border-top: 1px solid var(--border-color);
+      padding-top: 16px; margin-top: 12px;
+    }
+    .folder-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0;
+      padding: 6px 10px; border-radius: 8px; font-size: 12.5px;
+      font-weight: 600; margin-bottom: 14px; width: 100%;
+    }
+
+    /* =========================================
+       2. 메인 화면 (PDF 90% 이상 + 우상단 버튼 + 하단 플레이어)
+       ========================================= */
+    #main-container {
+      display: none; flex-direction: column;
+      width: 100%; height: 100%; position: relative;
+    }
+
+    /* 우측 상단 컨트롤 바 (Iframe을 쓰지 않으므로 오프셋 없이 화면 상단에 깔끔하게 배치) */
+    #top-right-controls {
+      position: fixed;
+      top: 12px;
+      right: 14px;
+      z-index: 500; display: flex; align-items: center; gap: 8px;
+      background: rgba(15, 23, 42, 0.78);
+      padding: 6px 8px; border-radius: 12px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+
+    .top-btn {
+      border: none; border-radius: 8px; padding: 7px 12px;
+      font-size: 13px; font-weight: 700; cursor: pointer;
+      display: flex; align-items: center; gap: 5px;
+      transition: 0.15s; color: #fff;
+    }
+    #btn-reopen-folder { background: #3b82f6; }
+    #btn-reopen-folder:hover { background: #2563eb; }
+
+    #btn-exit-app { background: #ef4444; padding: 7px 11px; }
+    #btn-exit-app:hover { background: #dc2626; }
+
+    /* PDF 뷰어 컨테이너 */
+    #pdf-viewer-wrapper {
+      flex: 1; width: 100%;
+      background: #334155;
+      overflow-y: auto; overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      position: relative;
+    }
+
+    #pdf-canvas-container {
+      width: 100%; display: flex; flex-direction: column;
+      align-items: center; gap: 6px; padding: 0;
+    }
+
+    .pdf-page-canvas {
+      display: block; width: 100% !important; height: auto !important;
+      background: #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+
+    #pdf-loading-overlay {
+      display: none; position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(15, 23, 42, 0.85); color: #fff;
+      padding: 14px 22px; border-radius: 10px; font-size: 14px; font-weight: 600;
+      z-index: 100;
+    }
+
+    #pdf-fallback-iframe {
+      display: none; width: 100%; height: 100%; border: none;
+    }
+
+    /* 하단 오디오 플레이어 */
+    #audio-bar {
+      height: var(--player-height); min-height: var(--player-height);
+      background: var(--panel-bg); border-top: 1px solid var(--border-color);
+      padding: 0 18px; display: flex; flex-direction: column; justify-content: center;
+      box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05); z-index: 20;
+    }
+
+    .audio-meta {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11.5px; color: var(--text-sub); margin-bottom: 4px;
+    }
+    .now-playing-title {
+      font-weight: 600; color: var(--text-main);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 65%;
+    }
+
+    .player-controls { display: flex; align-items: center; gap: 12px; }
+
+    .btn-play {
+      width: 40px; height: 40px; min-width: 40px; border-radius: 50%;
+      background: var(--primary-color); color: #fff; border: none;
+      font-size: 15px; cursor: pointer; display: flex;
+      justify-content: center; align-items: center; transition: 0.2s;
+    }
+    .btn-play:hover { background: var(--primary-hover); }
+    .btn-play:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    .seek-wrap { flex: 1; display: flex; align-items: center; gap: 10px; }
+    .time-txt { font-size: 12px; color: var(--text-sub); min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
+
+    input[type=range] {
+      -webkit-appearance: none; width: 100%; height: 5px;
+      background: #e2e8f0; border-radius: 3px; outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 15px; height: 15px;
+      border-radius: 50%; background: var(--primary-color); cursor: pointer;
+    }
+
+    /* =========================================
+       3. 종료 화면
+       ========================================= */
+    #exit-screen {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: #0f172a; color: #f8fafc;
+      flex-direction: column; justify-content: center; align-items: center;
+      text-align: center; padding: 24px;
+      z-index: 2000;
+    }
+    #exit-screen h2 { margin: 0 0 10px; font-size: 22px; }
+    #exit-screen p { margin: 0 0 24px; color: #94a3b8; font-size: 14px; }
   </style>
 </head>
 <body>
-  <div class="wrapper">
-    <!-- src 속성에 배포하신 정식 웹앱 링크(/exec)를 넣습니다 -->
-    <iframe 
-      src="https://script.google.com/macros/s/AKfycbwETHAVJ8E0JJFJW8omXE_sSaiQmGquPBQiLRvqRv5u8e59cNuc8D14gPHrQATJrgAJ/exec" 
-      allow="autoplay; fullscreen"
-    ></iframe>
+
+  <!-- 1. 폴더 입력 및 순차 파일 선택 모달 -->
+  <div id="setup-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>📂 학습 폴더 및 파일 선택</h2>
+        <button type="button" class="btn-close-modal" id="btn-close-modal" title="닫기">✕</button>
+      </div>
+
+      <div id="alert-box"></div>
+
+      <div class="form-group">
+        <label>구글 드라이브 폴더 링크</label>
+        <div class="folder-input-row">
+          <input type="text" id="folder-url-input" class="input-text" placeholder="https://drive.google.com/drive/folders/...">
+          <button type="button" id="btn-check-folder" class="btn-primary">폴더 확인</button>
+        </div>
+      </div>
+
+      <div id="file-selection-area">
+        <div class="folder-tag" id="folder-name-badge">📁 폴더명</div>
+
+        <div class="form-group">
+          <label><span class="step-badge">1단계</span>PDF 파일 선택</label>
+          <select id="pdf-select" class="select-box">
+            <option value="">-- PDF 파일을 선택하세요 --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label><span class="step-badge">2단계</span>오디오(MP3) 파일 선택</label>
+          <select id="audio-select" class="select-box" disabled>
+            <option value="">-- 먼저 위에서 PDF 파일을 선택하세요 --</option>
+          </select>
+        </div>
+
+        <button type="button" id="btn-start-play" class="btn-primary btn-full" disabled>▶ 선택한 파일 실행하기</button>
+      </div>
+    </div>
   </div>
+
+  <!-- 2. 메인 플레이어 화면 -->
+  <div id="main-container">
+    <div id="top-right-controls">
+      <button type="button" class="top-btn" id="btn-reopen-folder" title="다른 파일 또는 폴더 선택">📁 폴더</button>
+      <button type="button" class="top-btn" id="btn-exit-app" title="종료하기">✕ 종료</button>
+    </div>
+
+    <div id="pdf-viewer-wrapper">
+      <div id="pdf-loading-overlay">📄 PDF 문서를 화면 폭에 맞게 불러오는 중...</div>
+      <div id="pdf-canvas-container"></div>
+      <iframe id="pdf-fallback-iframe" src=""></iframe>
+    </div>
+
+    <div id="audio-bar">
+      <div class="audio-meta">
+        <span class="now-playing-title" id="playing-title">선택된 파일 없음</span>
+        <span id="audio-status-text">대기 중</span>
+      </div>
+      <div class="player-controls">
+        <audio id="audio-player" preload="auto"></audio>
+        <button type="button" class="btn-play" id="btn-play" disabled>▶</button>
+        <div class="seek-wrap">
+          <span class="time-txt" id="curr-time">0:00</span>
+          <input type="range" id="seek-bar" value="0" step="1">
+          <span class="time-txt" id="total-time">0:00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 종료 안내 화면 -->
+  <div id="exit-screen">
+    <h2>학습이 종료되었습니다</h2>
+    <p>브라우저 탭을 닫으시거나 아래 버튼을 눌러 다시 시작할 수 있습니다.</p>
+    <button type="button" class="btn-primary" id="btn-restart">🔄 다시 폴더 선택하기</button>
+  </div>
+
+  <script>
+    // =========================================================================
+    // [필수 설정] 아래 따옴표 안에 배포하신 구글 앱스 스크립트 웹앱 URL(/exec)을 넣으세요!
+    // =========================================================================
+    var GAS_API_URL = "https://script.google.com/macros/s/AKfycbzOhCs_0TLzzuKS5pbOs_PWjl33cM4heAw5Uzsax2UG1d5d8Bv8nRtaXsXJUrvi0Cah/exec";
+
+    // PDF 선명도 배율 (1.0 ~ 2.0 권장)
+    var PDF_RENDER_QUALITY = 1.5;
+
+    // 도메인 경로(/a/macros/도메인/)가 실수로 포함된 경우 표준 경로로 자동 보정
+    GAS_API_URL = GAS_API_URL.replace(/\/a\/macros\/[^/]+\//, '/macros/');
+
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+
+    var currentPdfDoc = null;
+    var currentAudioFiles = [];
+    var isAppRunning = false;
+    var isPlaying = false;
+    var resizeTimer = null;
+
+    var setupModal, btnCloseModal, alertBox, folderUrlInput, btnCheckFolder;
+    var fileSelectionArea, folderNameBadge, pdfSelect, audioSelect, btnStartPlay;
+    var mainContainer, pdfViewerWrapper, pdfCanvasContainer, pdfLoadingOverlay, pdfFallbackIframe;
+    var audioPlayer, btnPlay, seekBar, currTimeEl, totalTimeEl, playingTitle, audioStatusText;
+    var btnReopenFolder, btnExitApp, exitScreen, btnRestart;
+
+    // =========================================================================
+    // 구글 앱스 스크립트 JSON API 통신 헬퍼 함수 (세션 충돌 없음)
+    // =========================================================================
+    function callGasApi(action, payload) {
+      if (GAS_API_URL.indexOf("여기에_배포_ID") !== -1) {
+        return Promise.reject(new Error("index.html 상단의 GAS_API_URL 변수에 실제 배포 주소를 입력해 주세요."));
+      }
+
+      var bodyData = Object.assign({ action: action }, payload);
+
+      return fetch(GAS_API_URL, {
+        method: 'POST',
+        // text/plain 헤더를 사용하여 브라우저의 CORS 사전 검사(OPTIONS)를 우회하고 바로 전송
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify(bodyData)
+      })
+      .then(function(response) {
+        if (!response.ok) {
+          throw new Error("HTTP 오류 상태: " + response.status);
+        }
+        return response.json();
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      setupModal = document.getElementById('setup-modal');
+      btnCloseModal = document.getElementById('btn-close-modal');
+      alertBox = document.getElementById('alert-box');
+      folderUrlInput = document.getElementById('folder-url-input');
+      btnCheckFolder = document.getElementById('btn-check-folder');
+
+      fileSelectionArea = document.getElementById('file-selection-area');
+      folderNameBadge = document.getElementById('folder-name-badge');
+      pdfSelect = document.getElementById('pdf-select');
+      audioSelect = document.getElementById('audio-select');
+      btnStartPlay = document.getElementById('btn-start-play');
+
+      mainContainer = document.getElementById('main-container');
+      pdfViewerWrapper = document.getElementById('pdf-viewer-wrapper');
+      pdfCanvasContainer = document.getElementById('pdf-canvas-container');
+      pdfLoadingOverlay = document.getElementById('pdf-loading-overlay');
+      pdfFallbackIframe = document.getElementById('pdf-fallback-iframe');
+
+      audioPlayer = document.getElementById('audio-player');
+      btnPlay = document.getElementById('btn-play');
+      seekBar = document.getElementById('seek-bar');
+      currTimeEl = document.getElementById('curr-time');
+      totalTimeEl = document.getElementById('total-time');
+      playingTitle = document.getElementById('playing-title');
+      audioStatusText = document.getElementById('audio-status-text');
+
+      btnReopenFolder = document.getElementById('btn-reopen-folder');
+      btnExitApp = document.getElementById('btn-exit-app');
+      exitScreen = document.getElementById('exit-screen');
+      btnRestart = document.getElementById('btn-restart');
+
+      btnCheckFolder.addEventListener('click', checkFolderLink);
+      folderUrlInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') checkFolderLink();
+      });
+
+      pdfSelect.addEventListener('change', onPdfSelected);
+      audioSelect.addEventListener('change', function() {
+        btnStartPlay.disabled = !(pdfSelect.value && audioSelect.value);
+      });
+
+      btnStartPlay.addEventListener('click', loadSelectedMedia);
+
+      btnCloseModal.addEventListener('click', function() {
+        if (isAppRunning) setupModal.style.display = 'none';
+      });
+
+      btnReopenFolder.addEventListener('click', function() {
+        hideAlert();
+        btnCloseModal.style.display = 'flex';
+        setupModal.style.display = 'flex';
+      });
+
+      btnExitApp.addEventListener('click', exitApplication);
+
+      btnRestart.addEventListener('click', function() {
+        exitScreen.style.display = 'none';
+        btnCloseModal.style.display = 'none';
+        setupModal.style.display = 'flex';
+      });
+
+      btnPlay.addEventListener('click', toggleAudio);
+      audioPlayer.addEventListener('timeupdate', updateProgress);
+      audioPlayer.addEventListener('loadedmetadata', function() {
+        seekBar.max = audioPlayer.duration;
+        totalTimeEl.innerText = formatTime(audioPlayer.duration);
+      });
+      audioPlayer.addEventListener('ended', function() {
+        isPlaying = false;
+        btnPlay.innerText = '▶';
+      });
+      seekBar.addEventListener('input', function() {
+        audioPlayer.currentTime = seekBar.value;
+      });
+
+      window.addEventListener('resize', function() {
+        if (!currentPdfDoc || !isAppRunning) return;
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+          renderPdfPagesFitWidth(currentPdfDoc);
+        }, 300);
+      });
+    });
+
+    function showAlert(msg, isError) {
+      alertBox.innerText = msg;
+      alertBox.className = isError ? 'alert-error' : 'alert-info';
+      alertBox.style.display = 'block';
+    }
+    function hideAlert() {
+      alertBox.style.display = 'none';
+    }
+
+    // 1. 구글 드라이브 폴더 검증 및 파일 목록 조회
+    function checkFolderLink() {
+      var url = folderUrlInput.value.trim();
+      hideAlert();
+
+      if (!url) {
+        showAlert('⚠️ 구글 드라이브 폴더 링크를 입력해 주세요.', true);
+        folderUrlInput.focus();
+        return;
+      }
+
+      btnCheckFolder.disabled = true;
+      btnCheckFolder.innerText = '확인 중...';
+      fileSelectionArea.style.display = 'none';
+
+      callGasApi('getFolderFiles', { folderUrl: url })
+        .then(function(res) {
+          btnCheckFolder.disabled = false;
+          btnCheckFolder.innerText = '폴더 확인';
+
+          if (!res || !res.success) {
+            showAlert('⚠️ ' + (res ? res.error : '폴더를 확인할 수 없습니다. 다시 입력해 주세요.'), true);
+            folderUrlInput.focus();
+            folderUrlInput.select();
+            return;
+          }
+
+          if (res.pdfFiles.length === 0) {
+            showAlert('⚠️ 이 폴더 안에 PDF 파일이 없습니다. PDF와 오디오 파일이 들어있는 폴더 링크를 입력해 주세요.', true);
+            return;
+          }
+
+          if (res.audioFiles.length === 0) {
+            showAlert('⚠️ 이 폴더 안에 오디오(MP3) 파일이 없습니다. 오디오 파일이 포함된 폴더를 선택해 주세요.', true);
+            return;
+          }
+
+          folderNameBadge.innerText = '📁 폴더: ' + res.folderName + ' (PDF ' + res.pdfFiles.length + '개 / 오디오 ' + res.audioFiles.length + '개)';
+          currentAudioFiles = res.audioFiles;
+
+          pdfSelect.innerHTML = '<option value="">-- 1단계: PDF 파일을 선택하세요 --</option>';
+          res.pdfFiles.forEach(function(file) {
+            var opt = document.createElement('option');
+            opt.value = file.id;
+            opt.textContent = file.name;
+            pdfSelect.appendChild(opt);
+          });
+
+          audioSelect.innerHTML = '<option value="">-- 먼저 위에서 PDF 파일을 선택하세요 --</option>';
+          audioSelect.disabled = true;
+          btnStartPlay.disabled = true;
+
+          fileSelectionArea.style.display = 'block';
+        })
+        .catch(function(err) {
+          btnCheckFolder.disabled = false;
+          btnCheckFolder.innerText = '폴더 확인';
+          showAlert('⚠️ 서버 통신 오류가 발생했습니다:\n' + err.message, true);
+        });
+    }
+
+    // 2. 1단계 PDF 선택 시 ➔ 2단계 오디오 드롭다운 활성화 및 동일 이름 자동 매칭
+    function onPdfSelected() {
+      var selectedPdfId = pdfSelect.value;
+      if (!selectedPdfId) {
+        audioSelect.innerHTML = '<option value="">-- 먼저 위에서 PDF 파일을 선택하세요 --</option>';
+        audioSelect.disabled = true;
+        btnStartPlay.disabled = true;
+        return;
+      }
+
+      var selectedPdfName = pdfSelect.options[pdfSelect.selectedIndex].textContent;
+      var pdfBaseName = selectedPdfName.replace(/\.[^/.]+$/, '').trim().toLowerCase();
+
+      audioSelect.innerHTML = '<option value="">-- 2단계: 오디오 파일을 선택하세요 --</option>';
+      var matchedAudioId = '';
+
+      currentAudioFiles.forEach(function(file) {
+        var opt = document.createElement('option');
+        opt.value = file.id;
+        opt.textContent = file.name;
+        audioSelect.appendChild(opt);
+
+        var audioBaseName = file.name.replace(/\.[^/.]+$/, '').trim().toLowerCase();
+        if (audioBaseName === pdfBaseName) {
+          matchedAudioId = file.id;
+        }
+      });
+
+      audioSelect.disabled = false;
+
+      if (matchedAudioId) {
+        audioSelect.value = matchedAudioId;
+        btnStartPlay.disabled = false;
+      } else {
+        btnStartPlay.disabled = true;
+        audioSelect.focus();
+      }
+    }
+
+    // 3. 선택한 PDF 및 오디오 실행
+    function loadSelectedMedia() {
+      var pdfId = pdfSelect.value;
+      var audioId = audioSelect.value;
+      if (!pdfId || !audioId) return;
+
+      var audioName = audioSelect.options[audioSelect.selectedIndex].textContent;
+
+      if (isPlaying) {
+        audioPlayer.pause();
+        isPlaying = false;
+      }
+      btnPlay.disabled = true;
+      btnPlay.innerText = '▶';
+      seekBar.value = 0;
+      currTimeEl.innerText = '0:00';
+      totalTimeEl.innerText = '0:00';
+
+      setupModal.style.display = 'none';
+      mainContainer.style.display = 'flex';
+      isAppRunning = true;
+
+      playingTitle.innerText = '🎧 ' + audioName;
+      audioStatusText.innerText = '음원 로딩 중...';
+
+      pdfCanvasContainer.innerHTML = '';
+      pdfFallbackIframe.style.display = 'none';
+      pdfCanvasContainer.style.display = 'flex';
+      pdfLoadingOverlay.style.display = 'block';
+      pdfViewerWrapper.scrollTop = 0;
+
+      // (A) PDF 데이터 요청
+      callGasApi('getPdfData', { fileId: pdfId })
+        .then(function(res) {
+          if (!res || !res.success) {
+            pdfLoadingOverlay.style.display = 'none';
+            alert(res ? res.error : 'PDF 로딩 실패');
+            return;
+          }
+
+          if (res.useFallback) {
+            pdfLoadingOverlay.style.display = 'none';
+            pdfCanvasContainer.style.display = 'none';
+            pdfFallbackIframe.src = 'https://drive.google.com/file/d/' + res.fileId + '/preview';
+            pdfFallbackIframe.style.display = 'block';
+          } else {
+            var raw = atob(res.base64Data);
+            var uint8Array = new Uint8Array(raw.length);
+            for (var i = 0; i < raw.length; i++) {
+              uint8Array[i] = raw.charCodeAt(i);
+            }
+
+            pdfjsLib.getDocument({ data: uint8Array }).promise.then(function(pdfDoc) {
+              currentPdfDoc = pdfDoc;
+              renderPdfPagesFitWidth(pdfDoc);
+            }).catch(function(err) {
+              pdfLoadingOverlay.style.display = 'none';
+              alert('PDF 렌더링 오류: ' + err.message);
+            });
+          }
+        })
+        .catch(function(err) {
+          pdfLoadingOverlay.style.display = 'none';
+          alert('PDF 서버 요청 실패: ' + err.message);
+        });
+
+      // (B) 오디오 데이터 요청
+      callGasApi('getAudioData', { fileId: audioId })
+        .then(function(res) {
+          if (res && res.success) {
+            audioPlayer.src = res.audioUrl;
+            audioPlayer.load();
+            audioStatusText.innerText = '준비 완료';
+            btnPlay.disabled = false;
+          } else {
+            audioStatusText.innerText = '오디오 로딩 실패';
+            alert(res ? res.error : '오디오 로딩 오류');
+          }
+        })
+        .catch(function(err) {
+          audioStatusText.innerText = '통신 실패';
+          alert('오디오 서버 요청 실패: ' + err.message);
+        });
+    }
+
+    function renderPdfPagesFitWidth(pdfDoc) {
+      pdfCanvasContainer.innerHTML = '';
+      var totalPages = pdfDoc.numPages;
+      var containerWidth = pdfViewerWrapper.clientWidth || window.innerWidth;
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      function renderNextPage(pageNum) {
+        if (pageNum > totalPages) {
+          pdfLoadingOverlay.style.display = 'none';
+          return;
+        }
+
+        pdfDoc.getPage(pageNum).then(function(page) {
+          var unscaledViewport = page.getViewport({ scale: 1.0 });
+          var fitScale = (containerWidth / unscaledViewport.width) * dpr * (PDF_RENDER_QUALITY / 1.5);
+          var viewport = page.getViewport({ scale: fitScale });
+
+          var canvas = document.createElement('canvas');
+          canvas.className = 'pdf-page-canvas';
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+
+          var ctx = canvas.getContext('2d');
+          pdfCanvasContainer.appendChild(canvas);
+
+          if (pageNum === 1) {
+            pdfLoadingOverlay.style.display = 'none';
+          }
+
+          page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function() {
+            renderNextPage(pageNum + 1);
+          });
+        });
+      }
+
+      renderNextPage(1);
+    }
+
+    function toggleAudio() {
+      if (isPlaying) {
+        audioPlayer.pause();
+        btnPlay.innerText = '▶';
+      } else {
+        var playPromise = audioPlayer.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(function(err) {
+            alert('재생 오류: ' + err.message);
+          });
+        }
+        btnPlay.innerText = '⏸';
+      }
+      isPlaying = !isPlaying;
+    }
+
+    function updateProgress() {
+      var cur = audioPlayer.currentTime;
+      var dur = audioPlayer.duration;
+      if (!isNaN(dur)) {
+        seekBar.max = dur;
+        seekBar.value = cur;
+        currTimeEl.innerText = formatTime(cur);
+        totalTimeEl.innerText = formatTime(dur);
+      }
+    }
+
+    function formatTime(sec) {
+      var m = Math.floor(sec / 60);
+      var s = Math.floor(sec % 60);
+      return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    function exitApplication() {
+      if (isPlaying) {
+        audioPlayer.pause();
+        isPlaying = false;
+      }
+      audioPlayer.src = '';
+      pdfCanvasContainer.innerHTML = '';
+      pdfFallbackIframe.src = '';
+      currentPdfDoc = null;
+      isAppRunning = false;
+
+      mainContainer.style.display = 'none';
+      setupModal.style.display = 'none';
+      exitScreen.style.display = 'flex';
+
+      try { window.close(); } catch (e) {}
+    }
+  </script>
 </body>
 </html>
